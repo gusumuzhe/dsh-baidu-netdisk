@@ -1,5 +1,7 @@
 # dsh-baidu-netdisk
 
+[![test](https://github.com/gusumuzhe/dsh-baidu-netdisk/actions/workflows/test.yml/badge.svg)](https://github.com/gusumuzhe/dsh-baidu-netdisk/actions/workflows/test.yml)
+
 给 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）用的**百度网盘 + PanSou 搜索**连接器，带能力白名单。
 
 装上之后，可以在对话里让我：搜片源 → 解析分享 → 对比你网盘里已有的集 → 只转存缺的那几集。

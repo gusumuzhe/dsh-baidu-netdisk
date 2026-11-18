@@ -1,0 +1,35 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    name: 冒烟测试 (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      # 测试只依赖 node 内置模块与仓库内文件，无需安装依赖
+      - name: 运行测试
+        run: npm test
+
+      - name: 语法检查
+        run: |
+          for f in lib/*.js skills/media-ops/scripts/*.mjs test/*.mjs; do
+            node --check "$f" || exit 1
+          done
+          echo "所有文件语法通过"
