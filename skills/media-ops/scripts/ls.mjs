@@ -4,7 +4,7 @@ import https from 'node:https'
 const PROFILE_DIR = process.env.DSH_PROFILE_DIR || '/root/.dsh/profiles/web'
 const CONFIG_FILE = process.env.DSH_PROFILE_CONFIG || `${PROFILE_DIR}/cordis.patch.yml`
 const { encodeMessage, decodeMessage } = await import(`${PROFILE_DIR}/node_modules/dsh-ugreen-nas/lib/protobuf.js`)
-const catalog=JSON.parse(readFileSync(`${P}/lib/catalog.json`,'utf8'))
+const catalog=JSON.parse(readFileSync(`${PROFILE_DIR}/node_modules/dsh-ugreen-nas/lib/catalog.json`,'utf8'))
 const patch=readFileSync(CONFIG_FILE,'utf8')
 const endpoint=patch.match(/endpoint:\s*(\S+)/)?.[1]
 const token=patch.match(/accessToken:\s*(\S+)/)?.[1]

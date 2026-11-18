@@ -61,8 +61,8 @@ dsh plugin --profile web add dsh-baidu-netdisk
 | `baidu_quota` | | 容量 |
 | `baidu_list(dir)` | | 列目录 |
 | `baidu_search(keyword, dir)` | | 按文件名搜索 |
-| `baidu_share_info(shareUrl, pwd)` | | 解析分享，列出内部全部文件（**支持文件夹包装的分享**） |
-| `baidu_transfer(shareUrl, pwd, episodes, subdir)` | ✅ | 只转存指定集到暂存目录 |
+| `baidu_share_info(shareUrl, pwd, subdir?)` | | 解析分享，列出内部全部文件；整季打包的源用 `subdir` 钻入季目录 |
+| `baidu_transfer(shareUrl, pwd, episodes, subdir, shareSubdir?)` | ✅ | 只转存指定集到暂存目录 |
 | `pansou_search(keyword, limit)` | | 搜索资源，只返回百度网盘链接 |
 
 ## 自带 Skill：media-ops
@@ -87,7 +87,8 @@ dsh plugin --profile web add dsh-baidu-netdisk
 
 1. `surl` 参数**不含**分享链接 `/s/` 后的前导 `1`
 2. `/share/verify` 返回的 `randsk` 是 **URL 编码**的，需先 `decodeURIComponent`
-3. 浏览分享子目录时 `dir` 必须是 `/sharelink<uk>-<分享根fsid>/<文件夹名>`
+3. 浏览分享目录时 `dir` 必须是 `/sharelink0-<分享根fsid>/<分享根目录名>[/<子目录>]`
+   （分享根路径直接可从分享页的 `"path"` 字段取到；整季打包的源要多拼一层子目录）
 4. `/share/list` 必须带**真实 `bdstoken`**（`/api/gettemplatevariable` 获取），传 `"null"` 返回 `errno 2`
 
 ## 许可

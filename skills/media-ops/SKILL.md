@@ -29,12 +29,19 @@ pansou(搜索) → 百度网盘(转存到 /绿联下载) → 网盘工具(实时
 
 ## 标准补集流程
 
-1. `pansou_search("<剧名>", 15)` — 找源，看标题里的"更N集"
-2. `baidu_share_info(shareUrl, pwd)` — 返回 files[]，每个含 name/size/fsId
+1. **先用 TMDB 定基准**：`node scripts/tmdb_season.mjs <tmdbId> <season>` 拿到"已播出集数"
+   （不要用"源里有多少集"当基准——源本身可能缺集）
+1b. **再算缺口**：TMDB 已播出 − 本地已有 = 真正要补的集
+1c. **多源评分选源**：`baidu_rank_sources(keyword, needEpisodes="1-29,52")`
+   —— 不要直接取第一条。评分含覆盖度、每集体积（码率代理）、4K/HDR 比例；
+   **标题写"4K HQ"不代表高码率**，实测有源标称 4K 但每集只有 1GB
+2. `baidu_share_info(shareUrl, pwd, subdir?)` — 返回 files[]（name/size/fsId）；
+   若源是"整季打包"，先不传 subdir 看返回的 `subdirs`，再带上子目录名重查
 3. `baidu_list("/绿联下载/<剧名>")` 和 NAS `ls` 媒体库 — 确认已有哪些集
-4. `baidu_transfer(shareUrl, pwd, episodes="150,152-167", subdir="<剧名>")`
+4. `baidu_transfer(shareUrl, pwd, episodes="150,152-167", subdir="<剧名>", shareSubdir="<源内子目录>")`
    - 只传缺的 fs_id，内部还会检查目标目录已存在的集
-5. 等同步完成（`.baiduyun.p.downloading` 后缀消失）
+5. 等同步完成——**不要靠人盯**：把 `wait_sync.mjs` 挂成后台任务（`run_in_background`），
+   它每 60 秒轮询一次，全部就绪后退出并触发 DSH 的完成通知，届时再归位。
 6. 跑 `copy_in.mjs` 复制并改名进媒体库
 
 ## 命名规范（已固化）
@@ -56,12 +63,21 @@ pansou(搜索) → 百度网盘(转存到 /绿联下载) → 网盘工具(实时
    → 对策：用 `CreateFile`（可带 content，见 `scripts/create_file.mjs`）。
 3. **百度分享页 `surl` 不带前导 `1`** —— 链接是 `/s/1abc`，API 参数要 `abc`。
 4. **`randsk` 是 URL 编码的** —— 必须先 `decodeURIComponent`，否则二次编码导致 `errno -9`。
-5. **分享 `dir` 必须是 `/sharelink<uk>-<分享根fsid>/<文件夹名>`** —— 只传 `/文件夹名` 会 `errno 2`。
+5. **分享 `dir` 的完整格式**：`/sharelink0-<分享根fsid>/<分享根目录名>[/<子目录>]`
+   - 前缀 `sharelink0-` 实测通用（`sharelink<uk>-` 也行，但 uk 段来源不稳定）
+   - 分享根路径直接写在分享页的 `"path"` 字段里，解析它最稳
+   - **整季打包的源**（如 `神墓 (2022)/第 3 季 - .../`）必须再拼一层子目录；
+     `baidu_share_info` 会返回 `subdirs` 列表，把它填进 `shareSubdir` 即可
 6. **`/share/list` 必须带真实 `bdstoken`**（`/api/gettemplatevariable` 获取），传 `"null"` 不行。
 7. **百度官方「分享转存」是付费企业接口** —— 个人只能走网页端 `/share/transfer`（cookie 鉴权）。
 8. **同名剧容易撞名** —— 《斗破苍穹》有真人版/动态漫画/Q版等多个 TMDB 条目，必须靠 `tvshow.nfo` 钉 id。
 9. **绿联影视需开「优先本地信息」**，NFO 才生效；多季剧（如斗破苍穹）只靠 tvshow.nfo 可能仍拆分成两个合集。
-10. **`/app` 不是持久卷** —— 放在 `/app` 的东西容器重建可能丢；持久位置是 `/root/.dsh`。
+10. **删除操作必须显式确认** —— 曾经因为一个把路径写死的 `delete.mjs`，误删了整部剧（37 集）。
+    → 铁律：**不要保留写死路径的删除脚本**；任何删除前必须打印目标路径并要求 `--confirm`；
+      回收站若无权访问（`#recycle` 会报 Insufficient permissions），只能由用户在 NAS 界面恢复。
+11. **文件被占用时 `CpMovePath` 会失败**（`Insufficient permissions` / `context deadline exceeded`），
+    但 `Rename` 仍然可用——先改名保证刮削正确，目录合并等锁释放后再做。
+12. **`/app` 不是持久卷** —— 放在 `/app` 的东西容器重建可能丢；持久位置是 `/root/.dsh`。
 
 ## 脚本（在本 skill 的 scripts/ 下）
 
@@ -76,7 +92,7 @@ pansou(搜索) → 百度网盘(转存到 /绿联下载) → 网盘工具(实时
 | `copy_in.mjs --src <暂存> --dst <媒体> --show <剧名> --year <年> [--season 1]` | 把下载完成的集复制进媒体库并改名 |
 | `write_nfos.mjs` | 给多部剧批量写 `tvshow.nfo`（改脚本里的 `SHOWS`） |
 | `create_file.mjs <路径> [内容]` | 用 CreateFile 新建文件（可带内容） |
-| `delete.mjs` | 删除目录（进回收站，可恢复） |
+| `wait_sync.mjs --dir <目录> --from <起> --to <止>` | **轮询等待同步完成**（后台任务跑，完成即退出并触发通知） |
 
 ## 媒体库现状：现查，不要缓存
 

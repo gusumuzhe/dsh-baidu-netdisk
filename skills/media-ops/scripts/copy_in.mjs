@@ -13,7 +13,7 @@ const CONFIG_FILE = process.env.DSH_PROFILE_CONFIG || `${PROFILE_DIR}/cordis.pat
 const { encodeMessage, decodeMessage } = await import(`${PROFILE_DIR}/node_modules/dsh-ugreen-nas/lib/protobuf.js`)
 
 const P = '/root/.dsh/profiles/web/node_modules/dsh-ugreen-nas'
-const catalog = JSON.parse(readFileSync(`${P}/lib/catalog.json`, 'utf8'))
+const catalog = JSON.parse(readFileSync(`${PROFILE_DIR}/node_modules/dsh-ugreen-nas/lib/catalog.json`, 'utf8'))
 const patch = readFileSync(CONFIG_FILE, 'utf8')
 const url = new URL(patch.match(/endpoint:\s*(\S+)/)?.[1])
 const token = patch.match(/accessToken:\s*(\S+)/)?.[1]
@@ -47,7 +47,17 @@ const ls = (path) => post('CategoryOrFileDirList', 'ugidl.filesystem.cli.FileDir
 const rename = (dir, oldName, newName) => post('Rename', 'ugidl.filesystem.cli.RenameRequest', 'ugidl.filesystem.cli.FileStatus', { dir, old_name: oldName, new_name: newName, is_dry_run: false })
 const copy = (src, dst) => post('CpMovePath', 'ugidl.filesystem.cli.CpMovePathRequest', 'ugidl.filesystem.cli.CpMovePathResponse', { src, dst, type: true, cover: false, is_dry_run: false })
 
-const episodeOf = (n) => { const m = String(n).match(/S\d{1,2}\s*E(\d{1,4})/i); return m ? Number(m[1]) : null }
+// 支持三种集号写法：SxxExx / 92.mkv / 第92集
+const episodeOf = (n) => {
+  const s = String(n)
+  let m = s.match(/S\d{1,2}\s*E(\d{1,4})/i)
+  if (m) return Number(m[1])
+  m = s.match(/第\s*(\d{1,4})\s*[集话]/)
+  if (m) return Number(m[1])
+  m = s.match(/^(\d{1,4})\.(mkv|mp4|avi|ts|m4v|mov)$/i)
+  if (m) return Number(m[1])
+  return null
+}
 const qualityOf = (n) => /2160p|4k/i.test(n) ? '2160p' : /1080p/i.test(n) ? '1080p' : ''
 const pad = (n, w) => String(n).padStart(w, '0')
 
