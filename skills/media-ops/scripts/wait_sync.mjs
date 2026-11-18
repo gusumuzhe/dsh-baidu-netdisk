@@ -4,12 +4,15 @@
  * 判定标准：目标集全部出现，且不再有 `.baiduyun.p.downloading` 临时文件。
  * 作为后台任务运行时，完成即退出，会触发 DSH 的任务完成通知。
  *
- * 用法：
- *   node wait_sync.mjs --dir <NAS目录> --from 92 --to 103 [--interval 30] [--timeout 120]
+ * 用法（两种写法都支持）：
+ *   node wait_sync.mjs --dir <NAS目录> --from 92 --to 103
+ *   node wait_sync.mjs --dir <NAS目录> --episodes "201,208-219"
+ *   [--interval 30] [--timeout 120]
  * 退出码：0=完成  2=超时（打印当前状态）
  */
 import { readFileSync } from 'node:fs'
 import https from 'node:https'
+import { parseEpisodes } from '../../../lib/episodes.js'
 
 const PROFILE_DIR = process.env.DSH_PROFILE_DIR || '/root/.dsh/profiles/web'
 const CONFIG_FILE = process.env.DSH_PROFILE_CONFIG || `${PROFILE_DIR}/cordis.patch.yml`
@@ -22,14 +25,21 @@ const token = patch.match(/accessToken:\s*(\S+)/)?.[1]
 const argv = process.argv.slice(2)
 const arg = (k, d) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : d }
 const DIR = arg('--dir')
+const SPEC = arg('--episodes')
 const FROM = Number(arg('--from'))
 const TO = Number(arg('--to'))
 const INTERVAL = Math.max(Number(arg('--interval', 30)), 10) * 1000
 const TIMEOUT = Math.max(Number(arg('--timeout', 120)), 5) * 60 * 1000
-if (!DIR || !Number.isFinite(FROM) || !Number.isFinite(TO)) {
-  console.error('用法: --dir <目录> --from <起始集> --to <结束集> [--interval 30] [--timeout 120]')
+const want = SPEC
+  ? parseEpisodes(SPEC)
+  : (Number.isFinite(FROM) && Number.isFinite(TO))
+    ? parseEpisodes(`${FROM}-${TO}`)
+    : []
+if (!DIR || !want.length) {
+  console.error('用法: --dir <目录> (--from <起> --to <止> | --episodes "201,208-219") [--interval 30] [--timeout 120]')
   process.exit(1)
 }
+const LABEL = SPEC ? `E${SPEC}` : `E${FROM}–E${TO}`
 
 const ls = (path) => new Promise((resolve) => {
   const body = encodeMessage(catalog, 'ugidl.filesystem.cli.FileDirListRequest', { path, page: 1, limit: 1000 })
@@ -59,12 +69,10 @@ const episodeOf = (name) => {
   return m3 ? Number(m3[1]) : null
 }
 
-const want = []
-for (let i = FROM; i <= TO; i++) want.push(i)
 const startedAt = Date.now()
 const t0 = new Date().toLocaleTimeString('zh-CN')
 
-console.log(`[${t0}] 开始等待同步：${DIR}  目标 E${FROM}–E${TO}（共 ${want.length} 集）`)
+console.log(`[${t0}] 开始等待同步：${DIR}  目标 ${LABEL}（共 ${want.length} 集）`)
 
 let lastDone = -1
 for (;;) {
@@ -88,7 +96,7 @@ for (;;) {
   }
 
   if (done.size === total && pending === 0) {
-    console.log(`\n✅ 同步完成：E${FROM}–E${TO} 共 ${total} 集已全部就绪（耗时 ${elapsed} 分钟）`)
+    console.log(`\n✅ 同步完成：${LABEL} 共 ${total} 集已全部就绪（耗时 ${elapsed} 分钟）`)
     console.log(`   下一步：node copy_in.mjs --src "${DIR}" --dst "<媒体目录>" --show "<剧名>" --year <年份>`)
     process.exit(0)
   }

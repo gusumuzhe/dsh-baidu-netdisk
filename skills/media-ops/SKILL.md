@@ -92,7 +92,7 @@ pansou(搜索) → 百度网盘(转存到 /绿联下载) → 网盘工具(实时
 | `copy_in.mjs --src <暂存> --dst <媒体> --show <剧名> --year <年> [--season 1]` | 把下载完成的集复制进媒体库并改名 |
 | `write_nfos.mjs` | 给多部剧批量写 `tvshow.nfo`（改脚本里的 `SHOWS`） |
 | `create_file.mjs <路径> [内容]` | 用 CreateFile 新建文件（可带内容） |
-| `wait_sync.mjs --dir <目录> --from <起> --to <止>` | **轮询等待同步完成**（后台任务跑，完成即退出并触发通知） |
+| `wait_sync.mjs --dir <目录> (--from <起> --to <止> \| --episodes "201,208-219")` | **轮询等待同步完成**（支持非连续集号；后台跑，完成即触发通知） |
 
 ## 媒体库现状：现查，不要缓存
 

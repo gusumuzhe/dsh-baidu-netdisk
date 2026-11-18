@@ -31,6 +31,9 @@ test('episodeOf：常见命名都能认出集号', () => {
     ['92.mkv', 92],
     ['05v2 - 标题.mp4', 5],
     ['[05].mp4', null],
+    ['斗破苍穹 201 4K.mp4', 201],
+    ['沧元图 92 2160p.mkv', 92],
+    ['151 4K.mkv', 151],
   ]
   for (const [name, want] of cases) {
     assert.equal(episodeOf(name), want, `解析失败：${name}`)
