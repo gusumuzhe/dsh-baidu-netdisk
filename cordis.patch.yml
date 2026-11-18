@@ -1,0 +1,4 @@
+# Host-half entry. DSH loads ./lib/index.js as the plugin.
+- insert:
+    - id: dsh-baidu-netdisk
+      name: dsh-baidu-netdisk

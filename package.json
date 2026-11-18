@@ -1,0 +1,66 @@
+{
+  "name": "dsh-baidu-netdisk",
+  "version": "0.5.1",
+  "description": "Baidu Netdisk + PanSou connector for DeepSeek Harness: cookie-scoped tools with a hard capability whitelist.",
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json",
+    "./client": "./lib/client.js"
+  },
+  "files": [
+    "lib",
+    "skills",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "baidu",
+    "netdisk",
+    "pansou",
+    "media"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": "^0.1.0-0 || ^0.2.0-0 || ^0.2.1-0",
+    "@deepseek-ai/schemastery": "^3.18.0",
+    "@deepseek-ai/dsh-typert-protocol": "^0.1.0-0 || ^0.2.0-0 || ^0.2.1-0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-tools": {
+      "optional": true
+    },
+    "@deepseek-ai/schemastery": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-typert-protocol": {
+      "optional": true
+    }
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": []
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gusumuzhe/dsh-baidu-netdisk.git"
+  },
+  "homepage": "https://github.com/gusumuzhe/dsh-baidu-netdisk#readme",
+  "bugs": {
+    "url": "https://github.com/gusumuzhe/dsh-baidu-netdisk/issues"
+  },
+  "author": "gusumuzhe"
+}
