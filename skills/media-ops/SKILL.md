@@ -66,6 +66,18 @@ node cleanup_staging.mjs --src "<下载目录>" --dst "<媒体目录>" --confirm
 
 > 网盘侧没有删除工具，这是插件的安全设计（白名单里没有 delete）。清理网盘只能手动。
 
+## 一条龙用法
+
+常规补集不用分四步，直接：
+
+```bash
+node pipeline.mjs --show 沧元图 --year 2023 --season 1 --episodes 104-110 \
+  --share "https://pan.baidu.com/s/1xxx" --pwd 8888 --clean
+```
+
+它会依次执行：转存 → `wait_sync` 等同步 → `copy_in` 归位 → `cleanup_staging --confirm` 清暂存，
+任一步失败即中止。加 `--dry-run` 先看计划；`--skip-transfer` 表示已经转存过、只跑后三步。
+
 ## 命名规范（已固化）
 
 ```
