@@ -6,6 +6,7 @@
  * 用法：node copy_in.mjs --src <下载目录> --dst <媒体目录> --show 仙逆 --year 2023 [--season 1]
  */
 import { readFileSync } from 'node:fs'
+import { episodeOf, qualityOf } from '../../../lib/episodes.js'
 import https from 'node:https'
 // 路径可被环境变量覆盖，便于在别的机器上复用
 const PROFILE_DIR = process.env.DSH_PROFILE_DIR || '/root/.dsh/profiles/web'
@@ -47,21 +48,6 @@ const ls = (path) => post('CategoryOrFileDirList', 'ugidl.filesystem.cli.FileDir
 const rename = (dir, oldName, newName) => post('Rename', 'ugidl.filesystem.cli.RenameRequest', 'ugidl.filesystem.cli.FileStatus', { dir, old_name: oldName, new_name: newName, is_dry_run: false })
 const copy = (src, dst) => post('CpMovePath', 'ugidl.filesystem.cli.CpMovePathRequest', 'ugidl.filesystem.cli.CpMovePathResponse', { src, dst, type: true, cover: false, is_dry_run: false })
 
-// 支持三种集号写法：SxxExx / 92.mkv / 第92集
-const episodeOf = (n) => {
-  const s = String(n)
-  let m = s.match(/S\d{1,2}\s*E(\d{1,4})/i)
-  if (m) return Number(m[1])
-  m = s.match(/第\s*(\d{1,4})\s*[集话]/)
-  if (m) return Number(m[1])
-  m = s.match(/^(\d{1,4})\.(mkv|mp4|avi|ts|m4v|mov)$/i)
-  if (m) return Number(m[1])
-  return null
-}
-const qualityOf = (n) => /2160p|4k/i.test(n) ? '2160p' : /1080p/i.test(n) ? '1080p' : ''
-const pad = (n, w) => String(n).padStart(w, '0')
-
-const media = await ls(DST)
 const have = new Set(media.map((f) => episodeOf(f.name)).filter((x) => x != null))
 const src = await ls(SRC)
 const ready = src.filter((f) => f.ext && !/\.downloading$/i.test(f.name) && /\.(mp4|mkv|avi|ts|m4v)$/i.test(f.name))

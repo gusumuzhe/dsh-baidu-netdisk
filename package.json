@@ -1,6 +1,6 @@
 {
   "name": "dsh-baidu-netdisk",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "description": "Baidu Netdisk + PanSou connector for DeepSeek Harness: cookie-scoped tools with a hard capability whitelist.",
   "type": "module",
   "main": "./lib/index.js",
@@ -62,5 +62,8 @@
   "bugs": {
     "url": "https://github.com/gusumuzhe/dsh-baidu-netdisk/issues"
   },
-  "author": "gusumuzhe"
+  "author": "gusumuzhe",
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
 }
