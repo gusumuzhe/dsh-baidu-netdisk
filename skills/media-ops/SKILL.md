@@ -78,6 +78,10 @@ node pipeline.mjs --show 沧元图 --year 2023 --season 1 --episodes 104-110 \
 它会依次执行：转存 → `wait_sync` 等同步 → `copy_in` 归位 → `cleanup_staging --confirm` 清暂存，
 任一步失败即中止。加 `--dry-run` 先看计划；`--skip-transfer` 表示已经转存过、只跑后三步。
 
+**媒体目录布局自动判断**：`--season 1` 视为单季，平铺到 `<剧名> (年份)/`；
+`--season 2` 及以上视为多季，落到 `<剧名> (年份)/Season NN/`。
+判断错了用 `--flat` / `--season-dir` 显式覆盖。跑之前先看 `--dry-run` 打印的「媒体目录」那一行。
+
 ## 命名规范（已固化）
 
 ```
@@ -109,24 +113,31 @@ node pipeline.mjs --show 沧元图 --year 2023 --season 1 --episodes 104-110 \
 10. **删除操作必须显式确认** —— 曾经因为一个把路径写死的 `delete.mjs`，误删了整部剧（37 集）。
     → 铁律：**不要保留写死路径的删除脚本**；任何删除前必须打印目标路径并要求 `--confirm`；
       回收站若无权访问（`#recycle` 会报 Insufficient permissions），只能由用户在 NAS 界面恢复。
+    → `normalize.mjs` 已按此改造：`--apply` 只改名，删重复必须再加 `--confirm`；
+      集号解析不出或像年份（19xx/20xx）的文件一律跳过，体积相同也不删。
 11. **文件被占用时 `CpMovePath` 会失败**（`Insufficient permissions` / `context deadline exceeded`），
     但 `Rename` 仍然可用——先改名保证刮削正确，目录合并等锁释放后再做。
 12. **`/app` 不是持久卷** —— 放在 `/app` 的东西容器重建可能丢；持久位置是 `/root/.dsh`。
 
 ## 脚本（在本 skill 的 scripts/ 下）
 
-所有脚本都从 `/root/.dsh/profiles/web/cordis.patch.yml` 读 NAS endpoint/token，从
+所有脚本都通过 `lib/profile.js` 的 `readNasConfig()` 读 NAS endpoint/token（按
+`dsh-ugreen-nas` 条目 id 定位，不会串到别的插件），从
 `/root/.dsh/profiles/web/node_modules/dsh-ugreen-nas/lib/protobuf.js` 取 protobuf 编解码。
+集号解析统一走 `lib/episodes.js`，不要在脚本里另写一份。
 
 | 脚本 | 用途 |
 |---|---|
 | `ls.mjs <目录>` | 列出 NAS 目录（含隐藏项，比 `ugreen_file_list` 可靠） |
 | `scan.mjs` | 深度扫描媒体库，统计每部剧的集数 |
-| `normalize.mjs [--apply]` | 批量归一化命名（改写 `SHOWS` 数组里的剧） |
+| `normalize.mjs [--apply] [--confirm] [--show <剧名>]` | 批量归一化命名。默认 dry-run；`--apply` 只改名；再加 `--confirm` 才删重复（进回收站） |
 | `copy_in.mjs --src <暂存> --dst <媒体> --show <剧名> --year <年> [--season 1]` | 把下载完成的集复制进媒体库并改名 |
 | `write_nfos.mjs` | 给多部剧批量写 `tvshow.nfo`（改脚本里的 `SHOWS`） |
-| `create_file.mjs <路径> [内容]` | 用 CreateFile 新建文件（可带内容） |
+| `create_file.mjs <路径> [内容]` | 用 CreateFile 新建文件（可带内容）；缺路径会直接报用法退出 |
 | `wait_sync.mjs --dir <目录> (--from <起> --to <止> \| --episodes "201,208-219")` | **轮询等待同步完成**（支持非连续集号；后台跑，完成即触发通知） |
+| `cleanup_staging.mjs --src <暂存> --dst <媒体> [--confirm]` | 清理下载区：媒体库有同集同字节才删，默认 dry-run |
+| `pipeline.mjs --show … --year … --episodes … --share … [--clean] [--dry-run] [--skip-transfer]` | 一条龙：转存 → 等同步 → 归位 → 清暂存 |
+| `tmdb_season.mjs <tmdbId> <season> [--json]` | 从 TMDB 抓已播出集数，作为补集基准 |
 
 ## 媒体库现状：现查，不要缓存
 

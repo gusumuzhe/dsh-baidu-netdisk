@@ -7,12 +7,16 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
 import { episodeOf, qualityOf, parseEpisodes, diffEpisodes } from '../lib/episodes.js'
 import { parseShareRoot, BaiduClient, BaiduError } from '../lib/baidu.js'
+import { resolveInboxPath } from '../lib/transfer.js'
+import { parseEntryConfig, splitEntries } from '../lib/profile.js'
 import { skillProvider } from '../lib/skill.js'
 import * as sources from '../lib/sources.js'
 
@@ -47,6 +51,22 @@ test('episodeOf：不把年份/分辨率当集号', () => {
   }
   assert.equal(episodeOf('2025.2160p.mkv'), null)
   assert.equal(episodeOf('2160p.mkv'), null)
+})
+
+test('episodeOf：19xx/20xx 一律当年份，不当集号', () => {
+  // 这些曾经被解析成 E2023 / E2017，配合 normalize 的删除逻辑会误删
+  for (const name of [
+    '沧元图 2023 2160p.mkv',
+    '仙逆 2023 4K.mp4',
+    '斗破苍穹 2017 1080p.mp4',
+    '2023.mkv', '2022.mkv', '2017.mp4', '2024.mkv', '2026.mkv',
+  ]) {
+    assert.equal(episodeOf(name), null, `${name} 不应解析出集号`)
+  }
+  // 真正的集号不受影响
+  assert.equal(episodeOf('斗破苍穹 201 4K.mp4'), 201)
+  assert.equal(episodeOf('沧元图 92 2160p.mkv'), 92)
+  assert.equal(episodeOf('151 4K.mkv'), 151)
 })
 
 test('qualityOf：画质信号', () => {
@@ -115,6 +135,55 @@ test('BaiduClient：参数边界与重试配置', () => {
   assert.equal(err.name, 'BaiduError')
 })
 
+test('resolveInboxPath：拒绝路径穿越与绝对路径', () => {
+  assert.equal(resolveInboxPath('/绿联下载', '沧元图'), '/绿联下载/沧元图')
+  assert.equal(resolveInboxPath('/绿联下载', '第 3 季 - 2160p WEB-DL H265 AAC'), '/绿联下载/第 3 季 - 2160p WEB-DL H265 AAC')
+  assert.equal(resolveInboxPath('/绿联下载', 'a/./b'), '/绿联下载/a/b')
+  assert.equal(resolveInboxPath('/绿联下载', 'a//b'), '/绿联下载/a/b')
+  // 名字里带 .. 但不是路径段，应当放行
+  assert.equal(resolveInboxPath('/绿联下载', '..a'), '/绿联下载/..a')
+
+  for (const bad of ['../影视/动漫/仙逆 (2023)', '..', 'a/../../b', '/etc/passwd', '.', '', '   ']) {
+    assert.throws(() => resolveInboxPath('/绿联下载', bad), /已拒绝|不能为空/, `${bad} 应被拒绝`)
+  }
+  assert.throws(() => resolveInboxPath('', 'x'), /inboxRoot/)
+  assert.throws(() => resolveInboxPath('/', 'x'), /inboxRoot/)
+})
+
+test('profile：按插件条目 id 取配置，不串到别的插件', () => {
+  const patch = [
+    '- id: dsh-ugreen-nas',
+    '  name: dsh-ugreen-nas',
+    '  config:',
+    '    endpoint: https://nas:9443',
+    '    timeoutMs: 15000',
+    '- id: dsh-baidu-netdisk',
+    '  name: dsh-baidu-netdisk',
+    '  config:',
+    '    bduss: abc',
+    '    timeoutMs: 60000',
+    '    inboxRoot: /绿联下载',
+    '- id: web',
+    '  name: "@deepseek-ai/dsh-web"',
+    '  config:',
+    '    searchProvider: commandcode',
+  ].join('\n')
+
+  assert.deepEqual(splitEntries(patch).map((e) => e.id), ['dsh-ugreen-nas', 'dsh-baidu-netdisk', 'web'])
+
+  const bd = parseEntryConfig(patch, 'dsh-baidu-netdisk')
+  assert.equal(bd.timeoutMs, '60000', '不能取到 NAS 的 15000')
+  assert.equal(bd.bduss, 'abc')
+  assert.equal(bd.inboxRoot, '/绿联下载')
+
+  const nas = parseEntryConfig(patch, 'dsh-ugreen-nas')
+  assert.equal(nas.timeoutMs, '15000')
+  assert.equal(nas.endpoint, 'https://nas:9443')
+
+  // 不存在的条目返回空对象，不抛
+  assert.deepEqual(parseEntryConfig(patch, 'nope'), {})
+})
+
 test('index.js：声明的工具都存在（静态检查）', () => {
   const src = readFileSync(join(ROOT, 'lib/index.js'), 'utf8')
   for (const tool of [
@@ -126,5 +195,44 @@ test('index.js：声明的工具都存在（静态检查）', () => {
   // 安全红线：不该出现删除/移动/建分享的调用
   for (const forbidden of ['/api/filemanager?a=delete', 'create_share', 'share/create']) {
     assert.ok(!src.includes(forbidden), `出现危险调用：${forbidden}`)
+  }
+})
+
+test('scripts：在假 profile 下不崩（抓 ReferenceError 这类运行时错误）', () => {
+  // 背景：copy_in.mjs 曾因漏了 `const media = ...` 在 HEAD 上必崩，
+  // 而 CI 只跑 node --check，语法检查抓不到。这里真跑一遍。
+  const dir = mkdtempSync(join(tmpdir(), 'bdn-test-'))
+  const pkg = join(dir, 'node_modules', 'dsh-ugreen-nas', 'lib')
+  mkdirSync(pkg, { recursive: true })
+  writeFileSync(join(pkg, 'protobuf.js'), 'export const encodeMessage = () => Buffer.alloc(0)\nexport const decodeMessage = () => ({})\n')
+  writeFileSync(join(pkg, 'catalog.json'), '{}')
+  writeFileSync(join(dir, 'cordis.patch.yml'), [
+    '- id: dsh-ugreen-nas',
+    '  name: dsh-ugreen-nas',
+    '  config:',
+    '    endpoint: https://127.0.0.1:1',
+    '    accessToken: fake',
+    '- id: dsh-baidu-netdisk',
+    '  name: dsh-baidu-netdisk',
+    '  config:',
+    '    bduss: fake',
+    '    inboxRoot: /绿联下载',
+  ].join('\n'))
+
+  const scripts = [
+    'ls.mjs', 'scan.mjs', 'normalize.mjs', 'copy_in.mjs', 'write_nfos.mjs',
+    'create_file.mjs', 'wait_sync.mjs', 'cleanup_staging.mjs', 'pipeline.mjs', 'tmdb_season.mjs',
+  ]
+  for (const script of scripts) {
+    const r = spawnSync(process.execPath, [join(ROOT, 'skills/media-ops/scripts', script)], {
+      encoding: 'utf8',
+      timeout: 20000,
+      env: { ...process.env, DSH_PROFILE_DIR: dir },
+    })
+    const out = `${r.stdout || ''}${r.stderr || ''}`
+    assert.ok(
+      !/ReferenceError|is not defined|Cannot read propert/.test(out),
+      `${script} 运行时崩溃：\n${out.split('\n').slice(0, 6).join('\n')}`,
+    )
   }
 })

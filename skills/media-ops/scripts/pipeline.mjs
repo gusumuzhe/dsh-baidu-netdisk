@@ -55,7 +55,16 @@ if (!SKIP_TRANSFER && !SHARE) {
 
 const want = parseEpisodes(EPISODES)
 const pad2 = (n) => String(n).padStart(2, '0')
-const mediaDir = [LIBRARY, `${SHOW} (${YEAR})`, SEASON ? `Season ${pad2(SEASON)}` : ''].filter(Boolean).join('/')
+
+/**
+ * 媒体目录布局：单季剧平铺，多季剧才加 Season NN 子目录。
+ * 之前只要传了 --season 就拼 Season NN，导致单季剧（沧元图）被塞进
+ * 一个并不存在的 Season 01 目录，刮削会认不出来。
+ * 用 --season-dir / --flat 可以显式覆盖自动判断。
+ */
+const LAYOUT = flag('--season-dir') ? 'seasonDir' : flag('--flat') ? 'flat' : 'auto'
+const useSeasonDir = LAYOUT === 'seasonDir' || (LAYOUT === 'auto' && Number(SEASON) > 1)
+const mediaDir = [LIBRARY, `${SHOW} (${YEAR})`, useSeasonDir ? `Season ${pad2(SEASON)}` : ''].filter(Boolean).join('/')
 const downloadDir = `${DOWNLOADS}/${SUBDIR}`
 const netdiskDir = `${INBOX}/${SUBDIR}`
 
@@ -64,7 +73,7 @@ console.log(`  剧集      ${SHOW} (${YEAR})${SEASON ? ` S${pad2(SEASON)}` : ''}
 console.log(`  集号      ${want.length} 集：${want.join(',')}`)
 console.log(`  网盘暂存  ${netdiskDir}`)
 console.log(`  NAS 下载  ${downloadDir}`)
-console.log(`  媒体目录  ${mediaDir}`)
+console.log(`  媒体目录  ${mediaDir}${LAYOUT === 'auto' ? `（${useSeasonDir ? '多季，用 Season 子目录' : '单季，平铺'}；可用 --season-dir / --flat 覆盖）` : ''}`)
 console.log(`  清理暂存  ${CLEAN ? '是' : '否'}`)
 if (DRY) { console.log('\n(dry-run，不做任何改动)'); process.exit(0) }
 

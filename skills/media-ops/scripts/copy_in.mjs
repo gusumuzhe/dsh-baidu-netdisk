@@ -27,6 +27,15 @@ const arg = (k, d) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] :
 const SRC = arg('--src'); const DST = arg('--dst'); const SHOW = arg('--show')
 const YEAR = arg('--year'); const SEASON = Number(arg('--season', '1'))
 
+if (!SRC || !DST || !SHOW) {
+  console.error('用法: node copy_in.mjs --src <下载目录> --dst <媒体目录> --show <剧名> --year <年份> [--season 1]')
+  process.exit(1)
+}
+if (!Number.isFinite(SEASON) || SEASON < 1) {
+  console.error(`--season 必须是正整数，收到：${arg('--season')}`)
+  process.exit(1)
+}
+
 const post = (method, reqType, resType, payload) => new Promise((res) => {
   const body = encodeMessage(catalog, reqType, payload)
   const rq = https.request({

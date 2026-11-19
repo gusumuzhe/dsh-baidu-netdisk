@@ -24,8 +24,8 @@
 
 | 层 | 机制 |
 |---|---|
-| 能力 | 只有 7 个工具；`delete` / `move` / `create_share` **方法根本没实现** |
-| 路径 | 转存目标必须落在配置的暂存目录（默认 `/绿联下载`）前缀下，否则直接报"越界" |
+| 能力 | 只有 8 个工具；`delete` / `move` / `create_share` **方法根本没实现** |
+| 路径 | 转存目标必须落在配置的暂存目录（默认 `/绿联下载`）之下：拒绝绝对路径与 `..`，规范化后再校验前缀 |
 | 参数 | 转存必须显式列出集号，**不提供"全转"开关** |
 | 凭据 | BDUSS/STOKEN/PanSou 密码都是 `secret` 字段：只存设置页、不回传模型、不进对话 |
 | 写开关 | `allowTransfer` 默认关闭，关着时转存工具直接拒绝 |
@@ -64,6 +64,7 @@ dsh plugin --profile web add dsh-baidu-netdisk
 | `baidu_list(dir)` | | 列目录 |
 | `baidu_search(keyword, dir)` | | 按文件名搜索 |
 | `baidu_share_info(shareUrl, pwd, subdir?)` | | 解析分享，列出内部全部文件；整季打包的源用 `subdir` 钻入季目录 |
+| `baidu_rank_sources(keyword, needEpisodes, limit?)` | | 多源横向评分（覆盖度 / 每集体积 / 4K / HDR），选出最该用的源 |
 | `baidu_transfer(shareUrl, pwd, episodes, subdir, shareSubdir?)` | ✅ | 只转存指定集到暂存目录 |
 | `pansou_search(keyword, limit)` | | 搜索资源，只返回百度网盘链接 |
 
@@ -73,8 +74,8 @@ dsh plugin --profile web add dsh-baidu-netdisk
 
 - 完整流程（搜源 → 判重 → 转存 → 同步 → 归档命名）
 - 命名规范（`<剧名> (年份)/<剧名> SxxExx [画质].ext`）
-- **10 条实测踩坑记录**（见 `skills/media-ops/SKILL.md`）
-- 7 个辅助脚本（列目录/体检/改名/归位/写 NFO）
+- **12 条实测踩坑记录**（见 `skills/media-ops/SKILL.md`）
+- 10 个辅助脚本（列目录 / 体检 / 归一化 / 归位 / 等同步 / 清暂存 / 一条龙 / TMDB / 写 NFO / 建文件）
 
 ## 稳定性
 
