@@ -13,7 +13,6 @@ const PROFILE_DIR = process.env.DSH_PROFILE_DIR || '/root/.dsh/profiles/web'
 const CONFIG_FILE = process.env.DSH_PROFILE_CONFIG || `${PROFILE_DIR}/cordis.patch.yml`
 const { encodeMessage, decodeMessage } = await import(`${PROFILE_DIR}/node_modules/dsh-ugreen-nas/lib/protobuf.js`)
 
-const P = '/root/.dsh/profiles/web/node_modules/dsh-ugreen-nas'
 const catalog = JSON.parse(readFileSync(`${PROFILE_DIR}/node_modules/dsh-ugreen-nas/lib/catalog.json`, 'utf8'))
 const patch = readFileSync(CONFIG_FILE, 'utf8')
 const url = new URL(patch.match(/endpoint:\s*(\S+)/)?.[1])
@@ -48,10 +47,23 @@ const ls = (path) => post('CategoryOrFileDirList', 'ugidl.filesystem.cli.FileDir
 const rename = (dir, oldName, newName) => post('Rename', 'ugidl.filesystem.cli.RenameRequest', 'ugidl.filesystem.cli.FileStatus', { dir, old_name: oldName, new_name: newName, is_dry_run: false })
 const copy = (src, dst) => post('CpMovePath', 'ugidl.filesystem.cli.CpMovePathRequest', 'ugidl.filesystem.cli.CpMovePathResponse', { src, dst, type: true, cover: false, is_dry_run: false })
 
+const pad = (n, w) => String(n).padStart(w, '0')
+
+/** qualityOf 返回布尔信号对象，这里折算成文件名里的画质标签 */
+const qualityLabel = (name) => {
+  const q = qualityOf(name)
+  if (q.uhd) return '2160p'
+  if (q.fhd) return '1080p'
+  if (q.hd) return '720p'
+  return ''
+}
+
+const media = await ls(DST)
 const have = new Set(media.map((f) => episodeOf(f.name)).filter((x) => x != null))
 const src = await ls(SRC)
 const ready = src.filter((f) => f.ext && !/\.downloading$/i.test(f.name) && /\.(mp4|mkv|avi|ts|m4v)$/i.test(f.name))
 
+console.log(`${SHOW} (${YEAR}) S${pad(SEASON, 2)} → ${DST}`)
 console.log(`媒体库已有 ${have.size} 集 | 下载目录可用 ${ready.length} 个`)
 let ok = 0; let skip = 0; let fail = 0
 for (const f of ready) {
@@ -59,7 +71,7 @@ for (const f of ready) {
   if (ep == null) { console.log(`  ⚠️ 无集号，跳过: ${f.name}`); skip++; continue }
   if (have.has(ep)) { console.log(`  ↷ E${ep} 已存在，跳过`); skip++; continue }
   const ext = f.name.match(/\.(mp4|mkv|avi|ts|m4v)$/i)[0].toLowerCase()
-  const q = qualityOf(f.name)
+  const q = qualityLabel(f.name)
   const finalName = `${SHOW} S${pad(SEASON, 2)}E${pad(ep, 3)}${q ? ` [${q}]` : ''}${ext}`
   const t0 = Date.now()
   const r1 = await copy(`${SRC}/${f.name}`, DST)
