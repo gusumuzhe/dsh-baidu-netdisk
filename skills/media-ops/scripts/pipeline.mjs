@@ -12,22 +12,22 @@
  *   - 媒体目录   = <library>/<show> (<year>)[/Season NN]
  *   - --clean 才会在最后清理下载区（删除前仍会做「同集同字节」校验）
  */
-import { readFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { BaiduClient } from '../../../lib/baidu.js'
 import { transferEpisodes } from '../../../lib/transfer.js'
 import { parseEpisodes } from '../../../lib/episodes.js'
+import { readPluginConfig } from '../../../lib/profile.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const argv = process.argv.slice(2)
 const arg = (k, d) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : d }
 const flag = (k) => argv.includes(k)
 
-const PROFILE_DIR = process.env.DSH_PROFILE_DIR || '/root/.dsh/profiles/web'
-const patch = readFileSync(process.env.DSH_PROFILE_CONFIG || `${PROFILE_DIR}/cordis.patch.yml`, 'utf8')
-const cfg = (k, d) => patch.match(new RegExp(`\\n\\s+${k}:\\s*(\\S+)`))?.[1] ?? d
+// 按插件条目 id 取配置：全局正则抓第一个同名键会被 dsh-ugreen-nas 的 timeoutMs 顶掉
+const CFG = readPluginConfig('dsh-baidu-netdisk', { inboxRoot: '/绿联下载', timeoutMs: '15000' })
+const cfg = (k, d) => CFG[k] ?? d
 
 const SHOW = arg('--show')
 const YEAR = arg('--year')
@@ -78,7 +78,11 @@ const run = (label, file, args) => {
 }
 
 let transferred = 0
-if (!SKIP_TRANSFER) {
+if (SKIP_TRANSFER) {
+  // 已经转存过：后三步照跑，不能因为 transferred=0 就整段跳过
+  console.log('\n=== 1/4 转存 ===\n   已跳过（--skip-transfer，假定网盘里已有这些集）')
+  transferred = want.length
+} else {
   console.log('\n=== 1/4 转存 ===')
   const baidu = new BaiduClient({ bduss: cfg('bduss', ''), stoken: cfg('stoken', ''), timeoutMs: Number(cfg('timeoutMs', 15000)) })
   const res = await transferEpisodes(baidu, {

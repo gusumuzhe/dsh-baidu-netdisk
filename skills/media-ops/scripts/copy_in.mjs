@@ -7,16 +7,20 @@
  */
 import { readFileSync } from 'node:fs'
 import { episodeOf, qualityOf } from '../../../lib/episodes.js'
+import { readNasConfig } from '../../../lib/profile.js'
 import https from 'node:https'
 // 路径可被环境变量覆盖，便于在别的机器上复用
 const PROFILE_DIR = process.env.DSH_PROFILE_DIR || '/root/.dsh/profiles/web'
-const CONFIG_FILE = process.env.DSH_PROFILE_CONFIG || `${PROFILE_DIR}/cordis.patch.yml`
 const { encodeMessage, decodeMessage } = await import(`${PROFILE_DIR}/node_modules/dsh-ugreen-nas/lib/protobuf.js`)
 
 const catalog = JSON.parse(readFileSync(`${PROFILE_DIR}/node_modules/dsh-ugreen-nas/lib/catalog.json`, 'utf8'))
-const patch = readFileSync(CONFIG_FILE, 'utf8')
-const url = new URL(patch.match(/endpoint:\s*(\S+)/)?.[1])
-const token = patch.match(/accessToken:\s*(\S+)/)?.[1]
+const { endpoint, accessToken } = readNasConfig()
+if (!endpoint || !accessToken) {
+  console.error('未读到 NAS 配置（dsh-ugreen-nas 的 endpoint / accessToken）')
+  process.exit(1)
+}
+const url = new URL(endpoint)
+const token = accessToken
 
 const argv = process.argv.slice(2)
 const arg = (k, d) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : d }
