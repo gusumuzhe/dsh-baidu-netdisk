@@ -2,3 +2,7 @@ node_modules/
 *.log
 .env
 .DS_Store
+
+# 个人媒体库数据：不进仓库、不进 npm 包
+media-shows.json
+skills/media-ops/shows.json

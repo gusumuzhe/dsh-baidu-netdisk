@@ -10,21 +10,8 @@
  *   [--interval 30] [--timeout 120]
  * 退出码：0=完成  2=超时（打印当前状态）
  */
-import { readFileSync } from 'node:fs'
-import https from 'node:https'
 import { episodeOf, parseEpisodes } from '../../../lib/episodes.js'
-import { readNasConfig } from '../../../lib/profile.js'
-
-const PROFILE_DIR = process.env.DSH_PROFILE_DIR || '/root/.dsh/profiles/web'
-const { encodeMessage, decodeMessage } = await import(`${PROFILE_DIR}/node_modules/dsh-ugreen-nas/lib/protobuf.js`)
-const catalog = JSON.parse(readFileSync(`${PROFILE_DIR}/node_modules/dsh-ugreen-nas/lib/catalog.json`, 'utf8'))
-const { endpoint, accessToken } = readNasConfig()
-if (!endpoint || !accessToken) {
-  console.error('未读到 NAS 配置（dsh-ugreen-nas 的 endpoint / accessToken）')
-  process.exit(1)
-}
-const url = new URL(endpoint)
-const token = accessToken
+import { createNas, isDownloading } from '../../../lib/nas.js'
 
 const argv = process.argv.slice(2)
 const arg = (k, d) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : d }
@@ -45,24 +32,13 @@ if (!DIR || !want.length) {
 }
 const LABEL = SPEC ? `E${SPEC}` : `E${FROM}–E${TO}`
 
-const ls = (path) => new Promise((resolve) => {
-  const body = encodeMessage(catalog, 'ugidl.filesystem.cli.FileDirListRequest', { path, page: 1, limit: 1000 })
-  const rq = https.request({
-    hostname: url.hostname, port: url.port || 443, method: 'POST', rejectUnauthorized: false,
-    path: `${url.pathname.replace(/\/$/, '')}/ugreen/opencli/v1/${encodeURIComponent('ugreen.filemgr.internal.grpc')}/ugidl.filesystem.Filesystem/CategoryOrFileDirList`,
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/x-protobuf', Accept: 'application/x-protobuf', 'X-OpenCLI-Body-Format': 'protobuf', 'Content-Length': body.length },
-  }, (r) => {
-    const cs = []
-    r.on('data', (c) => cs.push(c))
-    r.on('end', () => {
-      const b = Buffer.concat(cs)
-      if (r.headers['x-grpc-code'] !== '0') return resolve([])
-      resolve(decodeMessage(catalog, 'ugidl.filesystem.cli.FileDirListResponse', b)?.data?.file_list?.files || [])
-    })
-  })
-  rq.on('error', () => resolve([]))
-  rq.write(body); rq.end()
-})
+let nas
+try {
+  nas = await createNas()
+} catch (e) {
+  console.error(e.message)
+  process.exit(1)
+}
 
 const startedAt = Date.now()
 const t0 = new Date().toLocaleTimeString('zh-CN')
@@ -71,13 +47,13 @@ console.log(`[${t0}] 开始等待同步：${DIR}  目标 ${LABEL}（共 ${want.l
 
 let lastDone = -1
 for (;;) {
-  const files = await ls(DIR)
+  const files = await nas.ls(DIR)
   const done = new Set()
   let pending = 0
   let bytes = 0
   for (const f of files) {
     const ep = episodeOf(f.name)
-    if (/\.baiduyun\.p\.downloading$/i.test(f.name)) {
+    if (isDownloading(f.name)) {
       // 只统计「本次要等的集」的临时文件；目录里别的剧集在下载不该阻塞判定
       if (ep == null || want.includes(ep)) { pending++; bytes += Number(f.size) || 0 }
       continue

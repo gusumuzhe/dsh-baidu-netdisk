@@ -106,7 +106,8 @@ if (SKIP_TRANSFER) {
 
 if (transferred > 0) {
   run('2/4 等待同步', 'wait_sync.mjs', ['--dir', downloadDir, '--episodes', EPISODES, '--interval', arg('--interval', '60'), '--timeout', arg('--timeout', '180')])
-  run('3/4 归位入库', 'copy_in.mjs', ['--src', downloadDir, '--dst', mediaDir, '--show', SHOW, '--year', YEAR, ...(SEASON ? ['--season', String(SEASON)] : [])])
+  // 传 --episodes 限定范围：暂存区里残留的别的集不该被顺手搬进媒体库
+  run('3/4 归位入库', 'copy_in.mjs', ['--src', downloadDir, '--dst', mediaDir, '--show', SHOW, '--year', YEAR, '--episodes', EPISODES, ...(SEASON ? ['--season', String(SEASON)] : [])])
   if (CLEAN) run('4/4 清理暂存', 'cleanup_staging.mjs', ['--src', downloadDir, '--dst', mediaDir, '--confirm'])
   else console.log('\n=== 4/4 清理暂存 ===\n   已跳过（加 --clean 启用）')
 }

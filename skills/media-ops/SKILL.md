@@ -95,10 +95,17 @@ node pipeline.mjs --show 沧元图 --year 2023 --season 1 --episodes 104-110 \
 
 ## 已知坑（都是实测踩过的）
 
-1. **NAS 的"移动"其实是复制** —— `CpMovePath` 跨目录/跨共享都不删源。批量搬 20GB 会慢到 1GB/分钟且产生双份。
+1. **`CpMovePath` 的 `type` 决定复制还是移动** —— `type=false` 是**复制**（源保留），
+   `type=true` 是**移动**（源删除）；响应 `receipt.type` 会如实给出 `OPERATION_TYPE_COPY` / `OPERATION_TYPE_MOVE`。
+   早期 `copy_in.mjs` 把 `type:true` 当复制用，实际一直在**移动**，导致暂存区被悄悄清空、
+   `cleanup_staging` 永远看到「0 个文件」。现已统一走 `lib/nas.js` 的 `copy()` / `move()`。
    → 对策：能"原地改名"就原地改名；目录合并用**目录级 rename**。
 2. **NAS 文件写入只能覆盖，不能新建** —— `WriteFile` 对不存在的文件报 `1302 Path does not exist`。
    → 对策：用 `CreateFile`（可带 content，见 `scripts/create_file.mjs`）。
+   → **反向的坑**：`CreateFile` 对**已存在**的文件返回成功但**什么都不做**（静默 no-op）。
+     早期 `write_nfos.mjs` 因此报告「✅ 成功」却从未更新过任何 NFO。
+     `lib/nas.js` 的 `createFile()` 已改为「存在则 WriteFile 覆盖，不存在则 CreateFile」，
+     并区分返回 `{ created }` / `{ overwritten }`。
 3. **百度分享页 `surl` 不带前导 `1`** —— 链接是 `/s/1abc`，API 参数要 `abc`。
 4. **`randsk` 是 URL 编码的** —— 必须先 `decodeURIComponent`，否则二次编码导致 `errno -9`。
 5. **分享 `dir` 的完整格式**：`/sharelink0-<分享根fsid>/<分享根目录名>[/<子目录>]`
@@ -118,21 +125,40 @@ node pipeline.mjs --show 沧元图 --year 2023 --season 1 --episodes 104-110 \
 11. **文件被占用时 `CpMovePath` 会失败**（`Insufficient permissions` / `context deadline exceeded`），
     但 `Rename` 仍然可用——先改名保证刮削正确，目录合并等锁释放后再做。
 12. **`/app` 不是持久卷** —— 放在 `/app` 的东西容器重建可能丢；持久位置是 `/root/.dsh`。
+13. **`Rename` 的响应是 `RenameResponse`，不是 `FileStatus`** —— 类型写错时 protobuf **不报错**，
+    静默解出 `{}`，于是「改名失败」被当成成功打印 ✅。必须解 `RenameResponse` 并校验
+    `receipt.status === 'RECEIPT_STATUS_DONE'`。`lib/nas.js` 的 `receiptOk()` 已统一处理。
+14. **目标目录不存在时，`CpMovePath` 报的是 `Insufficient permissions`**，不是 `Path does not exist`。
+    极易误判成权限问题。→ 复制前必须先 `ensureDir`（`CreateDir` 带 `make_all` 可建多级）。
+15. **`CreateDir` 对已存在目录报 1327 `A folder with the same name exists`** ——
+    `lib/nas.js` 的 `ensureDir()` 把它当成功（幂等），可以放心重复调用。
+16. **`--dst` 传剧集根目录时，Season 子目录里的集会被漏判** —— 早期 `copy_in.mjs` 只 `ls` 一层，
+    根目录下只有 `Season 04/` 和 `tvshow.nfo`，于是打印「媒体库已有 0 集」，
+    差点把已有的 15 集重复入库。现在 `copy_in` / `cleanup_staging` 都会递归一层 Season 子目录，
+    且 `--season>1` 时自动定位/创建 `Season NN`。
 
 ## 脚本（在本 skill 的 scripts/ 下）
 
-所有脚本都通过 `lib/profile.js` 的 `readNasConfig()` 读 NAS endpoint/token（按
-`dsh-ugreen-nas` 条目 id 定位，不会串到别的插件），从
+所有脚本都通过 `lib/nas.js` 的 `createNas()` 拿 NAS 客户端（内部按 `dsh-ugreen-nas`
+条目 id 读 endpoint/token，不会串到别的插件），从
 `/root/.dsh/profiles/web/node_modules/dsh-ugreen-nas/lib/protobuf.js` 取 protobuf 编解码。
-集号解析统一走 `lib/episodes.js`，不要在脚本里另写一份。
+**不要在脚本里另写一份 post/ls/rename 样板**——那正是 `FileStatus` 类型错误和
+`.data.data` 多剥一层这两个 bug 的来源。集号解析统一走 `lib/episodes.js`。
+
+`createNas()` 返回：`ls / lsEx / exists / ensureDir / rename / copy / move / del / createFile / readFile`，
+全部返回 `{ ok, error?, ... }`，且已内置 60s 超时与 `receipt.status` 校验。
 
 | 脚本 | 用途 |
 |---|---|
 | `ls.mjs <目录>` | 列出 NAS 目录（含隐藏项，比 `ugreen_file_list` 可靠） |
 | `scan.mjs` | 深度扫描媒体库，统计每部剧的集数 |
 | `normalize.mjs [--apply] [--confirm] [--show <剧名>]` | 批量归一化命名。默认 dry-run；`--apply` 只改名；再加 `--confirm` 才删重复（进回收站） |
-| `copy_in.mjs --src <暂存> --dst <媒体> --show <剧名> --year <年> [--season 1]` | 把下载完成的集复制进媒体库并改名 |
-| `write_nfos.mjs` | 给多部剧批量写 `tvshow.nfo`（改脚本里的 `SHOWS`） |
+| `copy_in.mjs --src <暂存> --dst <媒体> --show <剧名> --year <年> [--season 1] [--episodes "16,18-20"] [--dry-run] [--move]` | 把下载完成的集复制进媒体库并改名。`--dst` 可传剧集根目录（自动落 Season NN）；默认复制，`--move` 才移动 |
+| `write_nfos.mjs [--dry-run] [--force] [--show <剧名>]` | 批量写 `tvshow.nfo`。剧单来自登记表，默认只补缺失/内容不对的，幂等可反复跑；写入后回读校验 |
+| `register.mjs --scan [--dry-run] [--prune]` | **扫描媒体库，自动发现新剧并更新登记表**。新增剧不用改代码；`--prune` 清理磁盘上已不存在的幽灵条目 |
+| `register.mjs --list` | 打印登记表（含缺 tmdbId 的提醒） |
+| `register.mjs --set-tmdb "<剧名>" <id>` | 给某部剧填 TMDB id |
+| `register.mjs --remove "<目录名>"` | 从登记表移除（不动磁盘文件） |
 | `create_file.mjs <路径> [内容]` | 用 CreateFile 新建文件（可带内容）；缺路径会直接报用法退出 |
 | `wait_sync.mjs --dir <目录> (--from <起> --to <止> \| --episodes "201,208-219")` | **轮询等待同步完成**（支持非连续集号；后台跑，完成即触发通知） |
 | `cleanup_staging.mjs --src <暂存> --dst <媒体> [--confirm]` | 清理下载区：媒体库有同集同字节才删，默认 dry-run |
@@ -170,10 +196,62 @@ DSH 的加载期错误（例如 skill 的 `rank` 字段缺失）**语法检查�
 
 不要假设上一个会话做到哪一步——一切以磁盘现状为准。
 
+## 剧集登记表（个人数据，不进仓库）
+
+剧单**不再硬编码在脚本里**，由 `register.mjs` 维护。
+
+**存放位置**（这是个人数据，不是代码）：
+
+```
+优先级：--registry <路径>  >  $DSH_MEDIA_REGISTRY  >  <profileDir>/media-shows.json
+默认：  /root/.dsh/profiles/web/media-shows.json
+```
+
+> ⚠️ 早期版本把它放在 `skills/media-ops/shows.json`，会随 npm 包和公开 GitHub 一起分发——
+> 别人装了这个包，一开始就带着你的剧单，他自己的剧再追加进来，两份数据混在一起。
+> 现已迁出仓库；仓库里只保留 `shows.example.json` 作为格式示例，真实数据被 `.gitignore` 挡住。
+
+设计原则：**能从磁盘推断的，就不写进配置**。
+
+| 字段 | 来源 |
+|---|---|
+| `dir` / `title` / `year` | 目录名 `<剧名> (<年份>)` 直接解析 |
+| `layout` | 看目录里有没有 `Season NN` 子目录 |
+| `seasons` | 从 Season 目录名解析 |
+| `tmdbId` | 优先沿用已有登记，否则从 `tvshow.nfo` 读回 |
+
+**人工覆盖**：目录结构不规整的剧（如按「篇章」分目录），在登记项里加
+`"layoutLocked": true` 并手写 `layout`，`--scan` 就不会再覆盖它。
+其余自定义字段（如 `note`）也会原样保留。
+
+**同名剧**：`--show` / `--set-tmdb` 按剧名匹配时，若命中多部（如「诛仙 (2022)」
+和「诛仙 (2024)」）会报歧义并列出候选，需改用完整目录名。
+
+**幽灵条目**：剧目录改名或删除后，登记表里的旧条目不会自动消失（默认只增不删，
+避免误删人工填的 tmdbId）。`--scan` 会提示「有条目在磁盘上已不存在」，
+加 `--prune` 才真正清理。
+
+**NAS 不可达**：`--scan` 若在根目录下一部剧都没扫到，会直接报错退出（而不是
+静默报告「无需改动」）——路径写错和 NAS 挂掉都不该被当成「没有新剧」。
+
+**新增一部剧的流程（全程不改代码）：**
+
+```bash
+# 1. 把剧集放进 /volume1/影视/动漫/<剧名> (<年份>)/
+# 2. 扫描登记（自动发现新目录）
+node scripts/register.mjs --scan
+# 3. 若提示缺 tmdbId，人工确认后补上（撞名风险，见下方）
+node scripts/register.mjs --set-tmdb "剧名" 123456
+# 4. 写 NFO
+node scripts/write_nfos.mjs
+```
+
+只有 `tmdbId` 必须人工确认一次——目录名里没有这个信息，且同名剧容易撞（见下方撞名风险）。
+
 ## TMDB 参考 ID（稳定，可直接用）
 
 仙逆 223911 · 沧元图 229192 · 择天记 282158（2026 3D 版，26 集） · 光阴之外 281233 ·
-深空彼岸 283119 · 神墓 206343 · 斗破苍穹 79481（年番=第5季，共 219 集） · 星辰变 83708 · 永生 156571
+深空彼岸 283119 · 神墓 206343 · 斗破苍穹 79481（年番=第5季，共 219 集） · 星辰变 83708 · 永生 156571 · 诛仙 206484
 
 > 撞名风险：《斗破苍穹》还有真人版(81500)、动态漫画(206080)、Q版(321795)；
 > 《择天记》有 2017 真人(71419)、2015 动画(104697)。写 `tvshow.nfo` 时必须核对 ID。

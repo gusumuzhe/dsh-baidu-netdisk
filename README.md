@@ -74,8 +74,8 @@ dsh plugin --profile web add dsh-baidu-netdisk
 
 - 完整流程（搜源 → 判重 → 转存 → 同步 → 归档命名）
 - 命名规范（`<剧名> (年份)/<剧名> SxxExx [画质].ext`）
-- **12 条实测踩坑记录**（见 `skills/media-ops/SKILL.md`）
-- 10 个辅助脚本（列目录 / 体检 / 归一化 / 归位 / 等同步 / 清暂存 / 一条龙 / TMDB / 写 NFO / 建文件）
+- **16 条实测踩坑记录**（见 `skills/media-ops/SKILL.md`）
+- 11 个辅助脚本（列目录 / 体检 / 归一化 / 归位 / 等同步 / 清暂存 / 一条龙 / TMDB / 写 NFO / 建文件 / 剧集登记）
 
 ## 稳定性
 

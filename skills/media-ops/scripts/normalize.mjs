@@ -16,29 +16,15 @@
  * 用法：
  *   node normalize.mjs [--apply] [--confirm] [--root <媒体根>] [--show <剧名>]
  */
-import https from 'node:https'
 import { episodeOf, qualityOf } from '../../../lib/episodes.js'
-import { readNasConfig } from '../../../lib/profile.js'
-
-const PROFILE_DIR = process.env.DSH_PROFILE_DIR || '/root/.dsh/profiles/web'
-const { encodeMessage, decodeMessage } = await import(`${PROFILE_DIR}/node_modules/dsh-ugreen-nas/lib/protobuf.js`)
-const catalog = JSON.parse(
-  (await import('node:fs')).readFileSync(`${PROFILE_DIR}/node_modules/dsh-ugreen-nas/lib/catalog.json`, 'utf8'),
-)
-
-const { endpoint, accessToken } = readNasConfig()
-if (!endpoint || !accessToken) {
-  console.error('未读到 NAS 配置（dsh-ugreen-nas 的 endpoint / accessToken）')
-  process.exit(1)
-}
-const url = new URL(endpoint)
-const token = accessToken
+import { createNas, VIDEO_RE } from '../../../lib/nas.js'
+import { readRegistry, registryPath, LIBRARY_ROOT } from '../../../lib/shows.js'
 
 const argv = process.argv.slice(2)
 const arg = (k, d) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : d }
 const APPLY = argv.includes('--apply')
 const CONFIRM = argv.includes('--confirm')
-const ROOT = arg('--root', '/volume1/影视/动漫')
+const ROOT = arg('--root', LIBRARY_ROOT)
 const ONLY = arg('--show', '')
 
 if (CONFIRM && !APPLY) {
@@ -46,30 +32,14 @@ if (CONFIRM && !APPLY) {
   process.exit(1)
 }
 
-const post = (method, reqType, resType, payload) => new Promise((res) => {
-  const body = encodeMessage(catalog, reqType, payload)
-  const rq = https.request({
-    hostname: url.hostname, port: url.port || 443, method: 'POST', rejectUnauthorized: false,
-    path: `${url.pathname.replace(/\/$/, '')}/ugreen/opencli/v1/${encodeURIComponent('ugreen.filemgr.internal.grpc')}/ugidl.filesystem.Filesystem/${method}`,
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/x-protobuf', Accept: 'application/x-protobuf', 'X-OpenCLI-Body-Format': 'protobuf', 'Content-Length': body.length },
-  }, (r) => {
-    const cs = []
-    r.on('data', (c) => cs.push(c))
-    r.on('end', () => {
-      const b = Buffer.concat(cs)
-      if (r.headers['x-grpc-code'] !== '0') return res({ err: b.toString('utf8').slice(0, 160) })
-      try { res(decodeMessage(catalog, resType, b)) } catch { res({ ok: true }) }
-    })
-  })
-  rq.on('error', (e) => res({ err: String(e) }))
-  rq.write(body); rq.end()
-})
-const ls = (path) => post('CategoryOrFileDirList', 'ugidl.filesystem.cli.FileDirListRequest', 'ugidl.filesystem.cli.FileDirListResponse', { path, page: 1, limit: 1000 })
-  .then((d) => d?.data?.file_list?.files || [])
-const rename = (dir, oldName, newName) => post('Rename', 'ugidl.filesystem.cli.RenameRequest', 'ugidl.filesystem.cli.FileStatus', { dir, old_name: oldName, new_name: newName, is_dry_run: false })
-const del = (path) => post('DelPath', 'ugidl.filesystem.cli.DelPathRequest', 'ugidl.filesystem.cli.DelPathsResponse', { path, is_dry_run: false })
+let nas
+try {
+  nas = await createNas()
+} catch (e) {
+  console.error(e.message)
+  process.exit(1)
+}
 
-const VIDEO = /\.(mp4|mkv|avi|ts|m4v|mov)$/i
 const pad = (n, w) => String(n).padStart(w, '0')
 
 /** 画质标签：复用 episodes.js 的布尔信号，避免两套正则 */
@@ -98,21 +68,39 @@ const seasonFromDirName = (n) => {
   return m ? Number(m[1]) : null
 }
 
-// 每部剧的配置：目录名 → { title, year, layout, season }
-const SHOWS = [
-  { dir: '沧元图', title: '沧元图', year: 2023, layout: 'flat', season: 1 },
-  { dir: '斗破苍穹', title: '斗破苍穹', year: 2017, layout: 'seasonDir' },
-  { dir: '神墓', title: '神墓', year: 2022, layout: 'seasonDir' },
-  { dir: '永生', title: '永生', year: 2022, layout: 'arcDirs', season: 1 },
-  { dir: '择天记', title: '择天记', year: 2026, layout: 'flat', season: 1 },
-  { dir: '光阴之外', title: '光阴之外', year: 2025, layout: 'flat', season: 1 },
-  { dir: '深空彼岸', title: '深空彼岸', year: 2026, layout: 'flat', season: 1 },
-  { dir: '星辰变', title: '星辰变', year: 2018, layout: 'seasonDir' },
-]
+// 剧单来自共享登记表 shows.json（由 register.mjs --scan 自动维护），不再硬编码。
+// 登记表里的 dir 已是 `<剧名> (<年份>)` 形式，layout 由磁盘结构推断。
+const REGISTRY = registryPath(arg('--registry'))
+
+let registry
+try {
+  registry = readRegistry(REGISTRY)
+} catch (e) {
+  console.error(e.message)
+  process.exit(1)
+}
+if (!registry.shows.length) {
+  console.error('登记表为空。先跑：node scripts/register.mjs --scan')
+  process.exit(1)
+}
+
+const SHOWS = registry.shows.map((s) => ({
+  dir: s.dir,
+  title: s.title,
+  year: s.year,
+  layout: s.layout || 'flat',
+  // 季号回退值，仅在「文件名和目录名都取不到季号」时使用。
+  //   - 平铺剧（layout=flat）本身就是单季，回退到 1 无歧义
+  //   - 多季剧一律回退到 null，让 collect 跳过该文件——
+  //     早期用 seasons[0] 兜底，S6 里不带季号的文件会被误归到 S5，去重时可能删错
+  season: (s.layout || 'flat') === 'flat'
+    ? (s.seasons?.length === 1 ? s.seasons[0] : 1)
+    : null,
+}))
 
 const targets = ONLY ? SHOWS.filter((s) => s.dir === ONLY || s.title === ONLY) : SHOWS
 if (!targets.length) {
-  console.error(`没有匹配的剧：${ONLY}。可用：${SHOWS.map((s) => s.dir).join(', ')}`)
+  console.error(`没有匹配的剧：${ONLY}。可用：${SHOWS.map((s) => s.title).join(', ')}`)
   process.exit(1)
 }
 
@@ -131,7 +119,7 @@ for (const show of targets) {
   let base = ''
   let entries = []
   for (const name of candidates) {
-    const rows = await ls(`${ROOT}/${name}`)
+    const rows = await nas.ls(`${ROOT}/${name}`)
     if (rows.length) { base = `${ROOT}/${name}`; entries = rows; break }
   }
   if (!entries.length) {
@@ -143,12 +131,19 @@ for (const show of targets) {
   const skipped = [] // 集号不可信，不参与去重
 
   const collect = async (dir, seasonHint) => {
-    for (const f of await ls(dir)) {
-      if (!f.ext || !VIDEO.test(f.name)) continue
+    for (const f of await nas.ls(dir)) {
+      if (!f.ext || !VIDEO_RE.test(f.name)) continue
       const e = episodeOf(f.name)
       if (!plausibleEpisode(e)) { skipped.push({ dir, name: f.name, ep: e }); continue }
       const s = String(f.name).match(/S(\d{1,2})\s*E\d/i)?.[1]
-      items.push({ dir, name: f.name, size: Number(f.size) || 0, ep: e, season: s ? Number(s) : (seasonHint ?? 1) })
+      // 季号：文件名里的 S05 优先，其次目录名 Season 05，最后才用 seasonHint。
+      // 多季剧若三者都取不到，宁可跳过也不猜——猜错会在去重时删掉另一季的集。
+      const season = s ? Number(s) : (seasonHint ?? null)
+      if (season == null) {
+        skipped.push({ dir, name: f.name, ep: e, reason: '多季剧但取不到季号' })
+        continue
+      }
+      items.push({ dir, name: f.name, size: Number(f.size) || 0, ep: e, season })
     }
   }
 
@@ -185,7 +180,7 @@ for (const show of targets) {
 
   for (const it of keep.slice(0, 3)) {
     const q = qualityLabel(it.name)
-    const ext = it.name.match(VIDEO)[0].toLowerCase()
+    const ext = it.name.match(VIDEO_RE)[0].toLowerCase()
     console.log(`   ${it.name}\n      → ${show.title} S${pad(it.season, 2)}E${pad(it.ep, 3)}${q ? ` [${q}]` : ''}${ext}`)
   }
   if (keep.length > 3) console.log(`   ... 还有 ${keep.length - 3} 个`)
@@ -203,11 +198,11 @@ for (const show of targets) {
   // 1) 改名（可逆）
   for (const it of keep) {
     const q = qualityLabel(it.name)
-    const ext = it.name.match(VIDEO)[0].toLowerCase()
+    const ext = it.name.match(VIDEO_RE)[0].toLowerCase()
     const newName = `${show.title} S${pad(it.season, 2)}E${pad(it.ep, 3)}${q ? ` [${q}]` : ''}${ext}`
     if (newName === it.name) continue
-    const r = await rename(it.dir, it.name, newName)
-    if (r.err) console.log(`   ❌ 改名失败 ${it.name}: ${r.err}`)
+    const r = await nas.rename(it.dir, it.name, newName)
+    if (!r.ok) console.log(`   ❌ 改名失败 ${it.name}: ${r.error}`)
     else { totalRenamed++; console.log(`   ✅ ${it.name} → ${newName}`) }
   }
 
@@ -219,8 +214,8 @@ for (const show of targets) {
   }
   for (const it of drop) {
     const full = `${it.dir}/${it.name}`
-    const r = await del(full)
-    if (r.err) console.log(`   ❌ 删除失败 ${full}: ${r.err}`)
+    const r = await nas.del(full)
+    if (!r.ok) console.log(`   ❌ 删除失败 ${full}: ${r.error}`)
     else { totalDeleted++; console.log(`   ✅ 已删除 ${full}`) }
   }
 
@@ -229,8 +224,8 @@ for (const show of targets) {
     for (const s of entries.filter((x) => !x.ext)) {
       const n = seasonFromDirName(s.name)
       if (n && s.name !== `Season ${pad(n, 2)}`) {
-        const r = await rename(base, s.name, `Season ${pad(n, 2)}`)
-        if (r.err) console.log(`   ❌ 目录改名失败 ${s.name}: ${r.err}`)
+        const r = await nas.rename(base, s.name, `Season ${pad(n, 2)}`)
+        if (!r.ok) console.log(`   ❌ 目录改名失败 ${s.name}: ${r.error}`)
         else console.log(`   ✅ 目录 ${s.name} → Season ${pad(n, 2)}`)
       }
     }
@@ -238,8 +233,8 @@ for (const show of targets) {
   const targetDir = `${show.title} (${show.year})`
   const currentDir = base.slice(ROOT.length + 1)
   if (currentDir !== targetDir) {
-    const r = await rename(ROOT, currentDir, targetDir)
-    if (r.err) console.log(`   ❌ 剧目录改名失败 ${currentDir}: ${r.err}`)
+    const r = await nas.rename(ROOT, currentDir, targetDir)
+    if (!r.ok) console.log(`   ❌ 剧目录改名失败 ${currentDir}: ${r.error}`)
     else console.log(`   ✅ 剧目录 ${currentDir} → ${targetDir}`)
   }
 }

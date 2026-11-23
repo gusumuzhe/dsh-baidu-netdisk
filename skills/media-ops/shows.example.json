@@ -1,0 +1,31 @@
+{
+  "_comment": "剧集登记表格式示例。真实数据不放在仓库里——它在 <profileDir>/media-shows.json（默认 /root/.dsh/profiles/web/media-shows.json），可用 --registry 或 $DSH_MEDIA_REGISTRY 覆盖。用 `node scripts/register.mjs --scan` 自动生成。",
+  "shows": [
+    {
+      "dir": "示例剧名 (2023)",
+      "title": "示例剧名",
+      "year": 2023,
+      "tmdbId": 123456,
+      "layout": "flat"
+    },
+    {
+      "dir": "多季示例 (2022)",
+      "title": "多季示例",
+      "year": 2022,
+      "tmdbId": 654321,
+      "layout": "seasonDir",
+      "seasons": [
+        3
+      ]
+    }
+  ],
+  "_fields": {
+    "dir": "目录名，必须是 <剧名> (<年份>) 形式（全角括号也认）",
+    "title": "剧名，从 dir 解析",
+    "year": "首播年份，从 dir 解析",
+    "tmdbId": "TMDB 条目 id，必须人工确认（撞名风险）",
+    "layout": "flat=平铺 / seasonDir=Season NN 子目录；由 --scan 从磁盘推断",
+    "layoutLocked": "可选。true 时 --scan 不覆盖 layout，用于目录结构不规整的剧",
+    "seasons": "多季剧的季号列表，由 --scan 从 Season 目录名推断"
+  }
+}
